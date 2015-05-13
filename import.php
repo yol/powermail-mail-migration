@@ -65,20 +65,6 @@ foreach ($mails as $mail) {
         continue;
     }
     
-    $answers = $mail['piVars'];
-    $xmlParser = xml_parser_create("UTF-8");
-    xml_parser_set_option($xmlParser, XML_OPTION_CASE_FOLDING, 0);
-    //xml_parser_set_option($xmlParser, XML_OPTION_SKIP_WHITE, 1);
-    $valuesParsed = array();
-    //print "Parse $answers...\n";
-    if (xml_parse_into_struct($xmlParser, $answers, $valuesParsed) != 1) {
-        print "Could not parse XML data in mail UID " . $mail['uid'] . "\n";
-        print "Error code: " . xml_get_error_code($xmlParser) . " (" . xml_error_string(xml_get_error_code($xmlParser)) . ") at line " . xml_get_current_line_number($xmlParser) . "\n";
-        continue;
-    }
-    
-    xml_parser_free($xmlParser);
-       
     $newMailValues = array(
         'pid' => $mail['pid'],
         'crdate' => $mail['crdate'],
@@ -100,20 +86,28 @@ foreach ($mails as $mail) {
         //$newMailID = $db->tx_powermail_domain_model_mails()->insert_id();
     }
     
+    // use a hierarchical instead of a flat xml structure to cater for flexform arrays, used for checkboxes, radiobuttons, ...
+    $piVarsXml = simplexml_load_string($mail['piVars']);
+
     $newAnswers = array();
-    foreach ($valuesParsed as $valueSubtree) {
-        if ($valueSubtree['type'] != 'complete') {
+    foreach ($piVarsXml as $field) {
+        $fieldName = $field->getName();
+        if (!isset($fieldMap[$fieldName])) {
+//            print ("Field with marker $fieldName has no valid mapping - skipping mail\n");
+            $markersWithoutMapping[$fieldName][$mail['formid']] = 1;
             continue;
         }
-        $answerMarker = $valueSubtree['tag'];
-        $answerFieldID = $fieldMap[$answerMarker];
-        if (!isset($answerFieldID)) {
-            die("Field with marker $answerMarker has no valid mapping");
-        }
         $answerText = "";
-        if (isset($valueSubtree['value'])) {
-            $answerText = $valueSubtree['value'];
+        // subelements
+        if ($field->count()) {  // && (string) $field['type'] == 'array'
+            // XXX if needed: cater for more than one subelement, create one answer for each
+            // in our data $field->count() is max 1
+            $answerText = (string) $field->numIndex;
         }
+        else {
+            $answerText = (string) $field;
+        }
+
         //print "$answerMarker -> $answerFieldID: $answerText\n";
         $newAnswer = array(
             'pid' => $mail['pid'],
@@ -122,7 +116,7 @@ foreach ($mails as $mail) {
             'cruser_id' => $mail['cruser_id'],
             'value' => $answerText,
             'mail' => $newMail['uid'],
-            'field' => $answerFieldID,
+            'field' => $fieldMap[$fieldName],
             'value_type' => 0,
         );
         $newAnswers[] = $newAnswer;
