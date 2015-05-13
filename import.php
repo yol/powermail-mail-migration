@@ -8,7 +8,7 @@ $DRY_RUN = false;
 
 print "Connecting to MySQL... ";
 
-include "NotORM.php";
+include "notorm/NotORM.php";
 $pdo = new PDO(
         "mysql:host=localhost;dbname=my_db_name",
         "my_user",
