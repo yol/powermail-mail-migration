@@ -60,8 +60,7 @@ foreach ($mails as $mail) {
         continue;
     }
     
-    $newFormID = $formMap[$mail['formid']];
-    if (!isset($newFormID)) {
+    if (!isset($formMap[$mail['formid']])) {
         print "Could not find new form ID for " . $mail['formid'] . ", mail UID " . $mail['uid'] . "\n";
         continue;
     }
@@ -93,7 +92,7 @@ foreach ($mails as $mail) {
         'sender_ip' => $mail['senderIP'],
         'user_agent' => $mail['UserAgent'],
         'marketing_referer' => $mail['Referer'],
-        'form' => $newFormID,
+        'form' => $formMap[$mail['formid']],
     );
     
     if (!$DRY_RUN) {
