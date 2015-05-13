@@ -10,7 +10,7 @@ error_reporting(E_ALL);
 
 header("Content-Type: text/plain; charset=utf-8");
 
-$DRY_RUN = false;
+$DRY_RUN = FALSE;
 
 print <<<EOD
 Converting powermail 1.x mails to 2.x.
@@ -29,12 +29,13 @@ $pdo = new PDO(
 print "Connected\n\n";
 
 $db = new NotORM($pdo, new NotORM_Structure_Convention('uid'));
+// Uncomment to see all SQL queries
 /*$db->debug = function($query, $p) {
     print "QUERY: $query\n";
     return true;
 };*/
 
-# Old form ID -> new form ID
+// Old form ID -> new form ID
 $formMap = array(
     658 => 2,
     577 => 3
@@ -76,7 +77,6 @@ foreach ($mails as $mail) {
     }
 
     if (!isset($formMap[$mail['formid']])) {
-//        print "Could not find new form ID for " . $mail['formid'] . ", mail UID " . $mail['uid'] . "\n";
         $mailsWithoutNewFormId[$mail['formid']][$mail['uid']] = 1;
         continue;
     }
@@ -99,7 +99,6 @@ foreach ($mails as $mail) {
     
     if (!$DRY_RUN) {
         $newMail = $db->tx_powermail_domain_model_mails()->insert($newMailValues);
-        //$newMailID = $db->tx_powermail_domain_model_mails()->insert_id();
     }
     
     // use a hierarchical instead of a flat xml structure to cater for flexform arrays, used for checkboxes, radiobuttons, ...
@@ -109,7 +108,6 @@ foreach ($mails as $mail) {
     foreach ($piVarsXml as $field) {
         $fieldName = $field->getName();
         if (!isset($fieldMap[$fieldName])) {
-//            print ("Field with marker $fieldName has no valid mapping - skipping mail\n");
             $markersWithoutMapping[$fieldName][$mail['formid']] = 1;
             continue;
         }
@@ -143,7 +141,6 @@ foreach ($mails as $mail) {
             die("Could not insert all answers");
         }
 
-        //print "Update answers to " . count($newAnswers) . "\n";
         $newMail['answers'] = count($newAnswers);
         $newMail->update();
 
