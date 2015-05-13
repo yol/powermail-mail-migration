@@ -12,7 +12,11 @@ header("Content-Type: text/plain; charset=utf-8");
 
 $DRY_RUN = false;
 
-print "Connecting to MySQL... ";
+print <<<EOD
+Converting powermail 1.x mails to 2.x.
+
+Connecting to MySQL...
+EOD;
 
 include "notorm/NotORM.php";
 $pdo = new PDO(
@@ -22,7 +26,7 @@ $pdo = new PDO(
         array(PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8;")
         );
 
-print "Connected\n";
+print "Connected\n\n";
 
 $db = new NotORM($pdo, new NotORM_Structure_Convention('uid'));
 /*$db->debug = function($query, $p) {
@@ -54,23 +58,29 @@ $mails = $db->tx_powermail_mails();
 $mailCount = count($mails);
 $mailI = 0;
 $mailsDeleted = 0;
+$newAnswersTotal = 0;
+
+print "Converting $mailCount mails ... ";
 
 foreach ($mails as $mail) {
     $mailI++;
     if ($mailI % 100 == 1) {
-        print "Progress: at mail $mailI out of $mailCount\n";
+        print "$mailI ";
+        flush();
+        ob_flush();
     }
     
     if ($mail['deleted']) {
         $mailsDeleted++;
         continue;
     }
-    
+
     if (!isset($formMap[$mail['formid']])) {
-        print "Could not find new form ID for " . $mail['formid'] . ", mail UID " . $mail['uid'] . "\n";
+//        print "Could not find new form ID for " . $mail['formid'] . ", mail UID " . $mail['uid'] . "\n";
+        $mailsWithoutNewFormId[$mail['formid']][$mail['uid']] = 1;
         continue;
     }
-    
+
     $newMailValues = array(
         'pid' => $mail['pid'],
         'crdate' => $mail['crdate'],
@@ -136,10 +146,38 @@ foreach ($mails as $mail) {
         //print "Update answers to " . count($newAnswers) . "\n";
         $newMail['answers'] = count($newAnswers);
         $newMail->update();
+
+        $newAnswersTotal += $insertedCount;
     }
     
     $mailsSuccessful++;
 }
 
-print "Successfully converted $mailsSuccessful out of $mailCount mails ($mailsDeleted were already deleted)\n";
+print <<<EOD
 
+
+Successfully converted $mailsSuccessful out of $mailCount mails ($mailsDeleted were already deleted). $newAnswersTotal new answers have been inserted.
+
+The following mails could not be assigned to a new 2.x form:
+
+newFormId:\tmailId1, mailId2, ...
+---------------------------------
+
+EOD;
+ksort($mailsWithoutNewFormId, SORT_NATURAL);
+foreach ($mailsWithoutNewFormId as $newFormId => $mails) {
+    print "$newFormId:\t" . implode(', ', array_keys($mails)) . "\n";
+}
+
+print <<<EOD
+
+The following markers had no valid mappings and were ignored:
+
+marker:\tformid1, formid2, ...
+-----------------------------
+
+EOD;
+ksort($markersWithoutMapping, SORT_NATURAL);
+foreach ($markersWithoutMapping as $marker => $forms) {
+    print "$marker:\t" . implode(', ', array_keys($forms)) . "\n";
+}
