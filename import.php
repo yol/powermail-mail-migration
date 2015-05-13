@@ -1,14 +1,24 @@
 <?php
-header("Content-Type: text/plain; charset=utf-8");
+// enable dynamic status updates in browser, see php.net/flush
+apache_setenv('no-gzip', 1);
+ini_set('output_buffering', '0');
+ini_set('zlib.output_compression', '0');
 
 ini_set("display_errors", "1");
+ini_set('html_errors', '0');
 error_reporting(E_ALL);
+
+header("Content-Type: text/plain; charset=utf-8");
 
 $DRY_RUN = false;
 
-print "Connecting to MySQL... ";
+print <<<EOD
+Converting powermail 1.x mails to 2.x.
 
-include "NotORM.php";
+Connecting to MySQL...
+EOD;
+
+include "notorm/NotORM.php";
 $pdo = new PDO(
         "mysql:host=localhost;dbname=my_db_name",
         "my_user",
@@ -16,7 +26,7 @@ $pdo = new PDO(
         array(PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8;")
         );
 
-print "Connected\n";
+print "Connected\n\n";
 
 $db = new NotORM($pdo, new NotORM_Structure_Convention('uid'));
 /*$db->debug = function($query, $p) {
@@ -48,38 +58,29 @@ $mails = $db->tx_powermail_mails();
 $mailCount = count($mails);
 $mailI = 0;
 $mailsDeleted = 0;
+$newAnswersTotal = 0;
+
+print "Converting $mailCount mails ... ";
 
 foreach ($mails as $mail) {
     $mailI++;
     if ($mailI % 100 == 1) {
-        print "Progress: at mail $mailI out of $mailCount\n";
+        print "$mailI ";
+        flush();
+        ob_flush();
     }
     
     if ($mail['deleted']) {
         $mailsDeleted++;
         continue;
     }
-    
-    $newFormID = $formMap[$mail['formid']];
-    if (!isset($newFormID)) {
-        print "Could not find new form ID for " . $mail['formid'] . ", mail UID " . $mail['uid'] . "\n";
+
+    if (!isset($formMap[$mail['formid']])) {
+//        print "Could not find new form ID for " . $mail['formid'] . ", mail UID " . $mail['uid'] . "\n";
+        $mailsWithoutNewFormId[$mail['formid']][$mail['uid']] = 1;
         continue;
     }
-    
-    $answers = $mail['piVars'];
-    $xmlParser = xml_parser_create("UTF-8");
-    xml_parser_set_option($xmlParser, XML_OPTION_CASE_FOLDING, 0);
-    //xml_parser_set_option($xmlParser, XML_OPTION_SKIP_WHITE, 1);
-    $valuesParsed = array();
-    //print "Parse $answers...\n";
-    if (xml_parse_into_struct($xmlParser, $answers, $valuesParsed) != 1) {
-        print "Could not parse XML data in mail UID " . $mail['uid'] . "\n";
-        print "Error code: " . xml_get_error_code($xmlParser) . " (" . xml_error_string(xml_get_error_code($xmlParser)) . ") at line " . xml_get_current_line_number($xmlParser) . "\n";
-        continue;
-    }
-    
-    xml_parser_free($xmlParser);
-       
+
     $newMailValues = array(
         'pid' => $mail['pid'],
         'crdate' => $mail['crdate'],
@@ -93,7 +94,7 @@ foreach ($mails as $mail) {
         'sender_ip' => $mail['senderIP'],
         'user_agent' => $mail['UserAgent'],
         'marketing_referer' => $mail['Referer'],
-        'form' => $newFormID,
+        'form' => $formMap[$mail['formid']],
     );
     
     if (!$DRY_RUN) {
@@ -101,20 +102,28 @@ foreach ($mails as $mail) {
         //$newMailID = $db->tx_powermail_domain_model_mails()->insert_id();
     }
     
+    // use a hierarchical instead of a flat xml structure to cater for flexform arrays, used for checkboxes, radiobuttons, ...
+    $piVarsXml = simplexml_load_string($mail['piVars']);
+
     $newAnswers = array();
-    foreach ($valuesParsed as $valueSubtree) {
-        if ($valueSubtree['type'] != 'complete') {
+    foreach ($piVarsXml as $field) {
+        $fieldName = $field->getName();
+        if (!isset($fieldMap[$fieldName])) {
+//            print ("Field with marker $fieldName has no valid mapping - skipping mail\n");
+            $markersWithoutMapping[$fieldName][$mail['formid']] = 1;
             continue;
         }
-        $answerMarker = $valueSubtree['tag'];
-        $answerFieldID = $fieldMap[$answerMarker];
-        if (!isset($answerFieldID)) {
-            die("Field with marker $answerMarker has no valid mapping");
-        }
         $answerText = "";
-        if (isset($valueSubtree['value'])) {
-            $answerText = $valueSubtree['value'];
+        // subelements
+        if ($field->count()) {  // && (string) $field['type'] == 'array'
+            // XXX if needed: cater for more than one subelement, create one answer for each
+            // in our data $field->count() is max 1
+            $answerText = (string) $field->numIndex;
         }
+        else {
+            $answerText = (string) $field;
+        }
+
         //print "$answerMarker -> $answerFieldID: $answerText\n";
         $newAnswer = array(
             'pid' => $mail['pid'],
@@ -123,7 +132,7 @@ foreach ($mails as $mail) {
             'cruser_id' => $mail['cruser_id'],
             'value' => $answerText,
             'mail' => $newMail['uid'],
-            'field' => $answerFieldID,
+            'field' => $fieldMap[$fieldName],
             'value_type' => 0,
         );
         $newAnswers[] = $newAnswer;
@@ -137,10 +146,38 @@ foreach ($mails as $mail) {
         //print "Update answers to " . count($newAnswers) . "\n";
         $newMail['answers'] = count($newAnswers);
         $newMail->update();
+
+        $newAnswersTotal += $insertedCount;
     }
     
     $mailsSuccessful++;
 }
 
-print "Successfully converted $mailsSuccessful out of $mailCount mails ($mailsDeleted were already deleted)\n";
+print <<<EOD
 
+
+Successfully converted $mailsSuccessful out of $mailCount mails ($mailsDeleted were already deleted). $newAnswersTotal new answers have been inserted.
+
+The following mails could not be assigned to a new 2.x form:
+
+newFormId:\tmailId1, mailId2, ...
+---------------------------------
+
+EOD;
+ksort($mailsWithoutNewFormId, SORT_NATURAL);
+foreach ($mailsWithoutNewFormId as $newFormId => $mails) {
+    print "$newFormId:\t" . implode(', ', array_keys($mails)) . "\n";
+}
+
+print <<<EOD
+
+The following markers had no valid mappings and were ignored:
+
+marker:\tformid1, formid2, ...
+-----------------------------
+
+EOD;
+ksort($markersWithoutMapping, SORT_NATURAL);
+foreach ($markersWithoutMapping as $marker => $forms) {
+    print "$marker:\t" . implode(', ', array_keys($forms)) . "\n";
+}

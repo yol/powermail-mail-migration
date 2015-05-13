@@ -1,0 +1,3 @@
+[submodule "notorm"]
+	path = notorm
+	url = https://github.com/vrana/notorm.git
