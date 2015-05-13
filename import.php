@@ -1,8 +1,14 @@
 <?php
-header("Content-Type: text/plain; charset=utf-8");
+// enable dynamic status updates in browser, see php.net/flush
+apache_setenv('no-gzip', 1);
+ini_set('output_buffering', '0');
+ini_set('zlib.output_compression', '0');
 
 ini_set("display_errors", "1");
+ini_set('html_errors', '0');
 error_reporting(E_ALL);
+
+header("Content-Type: text/plain; charset=utf-8");
 
 $DRY_RUN = false;
 
